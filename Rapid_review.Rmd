@@ -1,0 +1,400 @@
+---
+title: "Rapid review for 'Evaluating individual heterogeneity in mental health research: a philosophical review of clustering methods and guideline for applications'"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+---
+<style type="text/css">
+div.main-container {
+  max-width: 1400px !important;
+}
+</style>
+
+
+```{r setup, include=FALSE, warning=FALSE,message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(pacman)
+p_load("tidyverse","litsearchr", "here","revtools", "igraph", "tidytext", "reactable", "readxl","waffle") 
+sessionInfo()
+```
+
+# Literature search 
+
+We first used the following search strategies to find possible clustering papers on 1/12/2021. 
+
+(mental health) OR (psychiatry) OR (mental disorders)) AND ((clustering ) OR (cluster analysis) OR (latent class) OR (latent profile) OR (subtype))
+
+Results were stored in the file "Counts_by_year.csv". Here we show the frequency of these keywords by publication year. 
+
+```{r,results='hide'}
+dta<-read_csv("Counts_by_year.csv",
+                   show_col_types=F) 
+```
+
+
+```{r,fig.height=5,fig.width=10}
+
+
+dta %>% 
+    ggplot(aes(x=Year,y=Count)) +
+    geom_bar(stat="identity")+ 
+    theme_bw() + 
+    scale_x_continuous(breaks =seq(from = 1956, to = 2021, by = 1))+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1),
+          panel.grid.minor.x = element_blank(),
+          panel.grid.major.x = element_blank())
+```
+
+All publications in the past year were subsequently extracted (stored in file "pubmed.nbib") for further evaluation. 
+
+# Import results
+
+```{r}
+naive_results <- litsearchr::import_results(file="pubmed.nbib") %>% 
+   # remove duplicates 
+   litsearchr::remove_duplicates( field = "title", method = "exact") 
+
+# Extract useful data fields
+naive_results<- naive_results %>% 
+    tibble::rownames_to_column(var="ID") %>% 
+    separate(location_id, c("doi1","doi2","doi3"),
+              sep = " and ") %>%
+    mutate(DOI=ifelse(str_detect(doi1,"doi"),doi1,doi2),
+           DOI= paste0("http://doi.org/",
+                       str_remove(DOI, " \\[doi\\]")),
+           ID=as.numeric(ID)) %>% 
+    select(ID, author,date_published,title,journal,abstract,pubmed_id,DOI) 
+
+```
+
+4904 publications were identified after duplication removal. 
+
+
+# Extract Bag-of-Words from title, abstract and keyword
+
+This process is known as tokenization, which into consecutive sequences of words that can be used in text mining. In this process we first extract pre-defined single potentially relevant to clustering analysis, 100 most frequent bigrams (two-word phrases) and top 50 most frequent trigrams (three-word phrases).
+
+
+
+```{r}
+#combine all text fields
+my_text<- tibble(ID = naive_results$ID, text = paste(naive_results$title,  
+                                                        naive_results$abstract, 
+                                                        naive_results$keywords))
+library(tidytext)
+
+# define words that are potentially related to clustering 
+list<-c("subtype","cluster", "clustering","class","classes","latent", "subtype", "subtypes")
+
+# extract single word tokens
+words<-my_text %>% 
+  group_by(ID) %>%
+  unnest_tokens(word, text )  %>% 
+  filter(!word %in% stop_words$word) %>% 
+  group_by(word) %>% 
+  mutate(n=n()) %>% 
+  filter(word  %in% list ) 
+  
+# bigram
+bigram<-my_text %>% 
+  group_by(ID) %>%
+  unnest_tokens(word, text ,token = "ngrams", n = 2)  %>% 
+  separate(word, into = c("word1", "word2"), sep = " ") %>% 
+  filter(!word1 %in% stop_words$word,
+          !word2 %in% stop_words$word) %>%
+  unite(word, c(word1, word2), sep = " ") %>% 
+  group_by(word) %>% 
+  mutate(n=n()) %>% 
+  filter(n>100)
+  
+# trigram
+trgram<-my_text %>% 
+  group_by(ID) %>%
+  unnest_tokens(word, text ,token = "ngrams", n = 3)  %>% 
+  separate(word, into = c("word1", "word2","word3"), sep = " ") %>% 
+  filter(!word1 %in% stop_words$word,
+          !word2 %in% stop_words$word,
+          !word3 %in% stop_words$word) %>%
+  unite(word, c(word1, word2, word3 ), sep = " ") %>% 
+  group_by(word) %>% 
+  mutate(n=n())  %>% 
+  filter(n>50)
+  
+# combine all words and check frequency
+ngram<-rbind(words,bigram,trgram) %>% 
+  select(-ID) %>% 
+  distinct() %>% 
+  arrange(n)
+
+ngram$word
+```
+
+
+# Screening using Bag-of-Words 
+
+## Check words related to clustering 
+
+The n-grams were reviewed first, from which we extracted related keywords as follows
+
+```{r}
+
+# related keywords.
+list<-c("subtype","cluster", "clustering", "class",
+        "classes","latent", "subtype", "subtypes",
+        "latent class",  "class analysis" , "latent profil", 
+        "profile analysis","data driven", "latent classes" ,
+        "cluster analysis", "latent class analysis", "latent profile analysis",
+        "latent class growth", "class growth analysis", "machine learning" )
+```
+
+
+Identify frequency of keywords included in individual paper. 
+
+```{r,fig.width=10,fig.height=5}
+No_keywords<-rbind(words,bigram,trgram) %>% 
+  mutate(clustering_keywords=ifelse(word %in% list,1,0)) %>% 
+  group_by(ID) %>% 
+  summarise(No_keywords=sum(clustering_keywords))
+
+No_keywords %>% 
+    group_by(No_keywords) %>% 
+    summarise(Count=n()) %>% 
+    ggplot(aes(x=No_keywords,y=Count)) +
+    geom_bar(stat="identity")+ 
+    theme_bw() + 
+    labs(x="Number of clustering related keywords", "Number of papers")
+
+naive_results<-naive_results %>% 
+  left_join(No_keywords)
+```
+
+
+Manually reviewed the ranking of number of keywords.
+
+```{r}
+naive_results %>% 
+  select(abstract,No_keywords) %>%
+  arrange(desc(No_keywords)) %>% 
+  reactable(
+        columns = list( abstract = colDef(width = 900)),
+          fullWidth = FALSE,
+          filterable = TRUE, 
+          compact    = TRUE, # for minimum row height
+          striped    = TRUE, # banded rows
+          resizable  = TRUE,
+          defaultPageSize = 10)
+```
+
+
+The results suggested a possible clustering paper when keywords were showed up for three or more times.
+
+```{r}
+naive_results<-filter(naive_results,No_keywords>=3)
+dim(naive_results)
+```
+
+# Manual evaluation
+
+In this section we look more closely into the selected papers that published in top journals that publish most of clustering papers. 
+
+##  Extract results for top journals 
+
+Next we look at a list of journals published most of papers potentially related to clustering.
+
+```{r}
+Journals<-naive_results %>% 
+    group_by(journal) %>% 
+    tally() %>% 
+    na.omit() %>% 
+    arrange(desc(n))
+nrow(Journals)
+head(Journals,20)
+```
+Here we choose to evaluate papers published in a few journals (broader scope mental health journals with an impact factor of 3 or above). 
+ 
+
+```{r}
+journals<-c( "Journal of affective disorders",
+             "Frontiers in psychiatry",
+             "BMC psychiatry",
+             "Psychological medicine",
+             "Journal of psychiatric research",
+             "Frontiers in psychology")
+
+naive_selected<-naive_results %>% 
+    filter(journal %in% journals)
+dim(naive_selected)
+```
+139 publications were identified.
+
+## Manual screen titles and abstract
+
+Next we manually screened the title and abstract using the screen_abstracts function from the revtools package.  
+
+### Inclusion and exclusion criteria
+
+* All study applied any clustering methods were included. 
+
+* Studies using clustering results from a different study were excluded
+
+
+
+```{r, eval=FALSE}
+screen <- read_bibliography("pubmed.nbib")
+screen<-filter(screen, title %in% naive_selected$title)
+screen_abstracts(screen)
+```
+
+# Save file for full text review 
+
+96 publications were screened out for full text review and data extraction. Two publications were further identified as not using clustering methods in full text review.  Data extraction from 94 publications were conducted by Caroline Gao and Johanna Bayer. 
+
+
+```{r }
+# prepare data extraction file 
+screened<-read_csv(here::here("Screened_papers.csv"),
+                   show_col_types=F)
+```
+
+```{r}
+Full_text<-naive_selected %>% 
+    filter(title %in% screened$title) %>% 
+    mutate(year=substr(date_published,1,4),
+           ID=paste(gsub( " .*$", "", author ), year)) %>% 
+    group_by(ID) %>% 
+    mutate(n=seq(n()),N=n()) %>% 
+    mutate(ID=ifelse(N==1,ID, paste0(ID,letters[n]))) %>% 
+    select(ID,title,DOI, author, year,journal, abstract)  
+```
+
+```{r}
+write_csv(Full_text,"Full text review.csv")
+```
+
+# Results 
+
+Data extraction results were listed below.
+
+```{r}
+Results<-as_tibble(read_excel("Full text reviewed.xlsx")) %>% 
+   mutate_at(vars(`Reported method selecting number of clusters`:`Avaliable data`), 
+                   function(x) factor(as.numeric(x), levels=c(0,1), labels=c("No","Yes")))
+
+Results %>% 
+    select(-Abstract) %>% 
+    reactable(
+          fullWidth = FALSE,
+          filterable = TRUE, 
+          compact    = TRUE, # for minimum row height
+          striped    = TRUE, # banded rows
+          resizable  = TRUE,
+          defaultPageSize = 10)
+```
+
+The distribution of modelling approaches is surmised with the following figure. Over half of the publications applied either LCA or LPA. 
+
+```{r,fig.width=10,fig.height=5}
+Results %>%
+    group_by(Method) %>% 
+    summarise(N=n()) %>% 
+    mutate(N=N/94) %>% 
+    ggplot(aes(y = reorder(Method,-N),
+               x=N)) +
+    geom_bar(stat="identity")+ 
+    theme_bw() + 
+    labs(y="", x= "Number of publications") +
+    scale_x_continuous(labels = scales::percent_format(accuracy = 1),
+                       limits = c(0,0.4)) +
+    geom_text(aes(label= paste0(round(N*100),"%")), position=position_dodge(width=0.9), hjust=-0.2)
+  
+  
+```
+
+Distributions of modelling choices were found similar between selected journals with Journal of Affective Disorders published more clustering papers compared with other journals. 
+
+
+```{r,fig.width=12,fig.height=5}
+tb <- " Model-based clustering | Latent Class Analysis (LCA)
+Model-based clustering | Latent Profile Analysis (LPA) 
+Model-based clustering | Growth Mixture Modelling (GMM)
+Model-based clustering | Latent Class Growth Analysis (LCGA)
+Model-based clustering | Latent Class Factor Analysis (LCFA)
+Model-based clustering | Structural Equation Modeling (SEM)
+Model-based clustering | Latent Class Mixed Model (LCMM)
+Centre-based partitioning clustering | K-means
+Centre-based partitioning clustering | Partition Around Medoids (PAM)
+Hierarchical clustering | Hierarchical clustering
+Other | Dynamic Time Warp
+Other | Hierarchical clustering optimised with k-means
+Unclear | Unclear
+"
+tb <- read.delim(textConnection(tb),header=FALSE,
+                 sep="|",strip.white=TRUE,stringsAsFactors=FALSE)
+names(tb)<-c("Method type", "Method")
+
+Model_type<-Results %>% 
+  left_join(tb) %>% 
+  mutate(`Method type`=factor(`Method type`,
+                              levels= c("Model-based clustering",
+                                        "Centre-based partitioning clustering",
+                                        "Hierarchical clustering",
+                                        "Other",
+                                        "Unclear")),
+         Journal= factor(Journal,
+                         levels=c("Journal of affective disorders",
+                                  "Frontiers in psychiatry",
+                                  "BMC psychiatry",
+                                  "Journal of psychiatric research",
+                                  "Psychological medicine", 
+                                  "Frontiers in psychology")))
+table(Model_type$`Method type`)
+
+Model_type  %>% 
+  group_by(Journal,`Method type`) %>% 
+  summarise(Numbers=n()) %>% 
+  ggplot( aes(fill=`Method type`, values=Numbers)) + 
+  geom_waffle(color = "white", size=.25, n_rows = 1, flip = F, show.legend = T) +
+  facet_wrap(Journal~.,nrow= 6, strip.position = "left") +
+  scale_y_discrete(expand=c(0,0)) +
+  coord_equal() +
+  labs(
+    y = "",
+    x = "Number of publicatons",
+    fill= ""
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank(), 
+        strip.text.y.left = element_text(angle = 0,hjust = 0),
+        axis.ticks.x = element_blank(),
+        axis.text = element_blank(),
+        legend.position = "bottom") +
+  scale_fill_manual(values=c("#08519c", "#4292c6",  "#9ecae1", "#deebf7", "#969696")) 
+```
+
+
+Over 80% of publications reported methods for choosing best number of custers and established additional models to validate meaningfulness of the clustering results. However only about 5% of publications applied Cross Validation (CV).  Less than 30% used other resampling (mainly bootstrap likelihood ratio test was used) or randomisation (random initialization) methods. Only 5 publications provided source data, and among them only one published analysis code. 
+
+```{r,fig.width=10,fig.height=5}
+Results %>% 
+  select(ID,`Reported method selecting number of clusters`:`Avaliable data`) %>% 
+  pivot_longer(cols=`Reported method selecting number of clusters`:`Avaliable data`,
+                 names_to="Indicator",values_to= "Type") %>% 
+  mutate(Type=as.numeric(Type)-1) %>% 
+  group_by(Indicator) %>% 
+  summarise(N=sum(Type,na.rm = T)) %>% 
+  mutate(N=N/96) %>% 
+  ggplot(aes(y = reorder(Indicator,-N),
+               x=N)) +
+    geom_bar(stat="identity")+ 
+    theme_bw() + 
+    labs(y="", x= "Percentage of publications") +
+    scale_x_continuous(labels = scales::percent_format(accuracy = 1),
+                       limits = c(0,1)) +
+    geom_text(aes(label= paste0(round(N*100),"%")), position=position_dodge(width=0.9), hjust=-0.2)
+```
+
