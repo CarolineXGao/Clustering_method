@@ -1,9 +1,8 @@
 ---
-title: "Rapid review for 'Evaluating individual heterogeneity in mental health research: a philosophical review of clustering methods and guideline for applications'"
-output: 
-  html_document:
-    toc: true
-    toc_depth: 2
+title: "Supplementary Material II <br>" 
+subtitle: "Rapid review for 'Evaluating individual heterogeneity in mental health research: a philosophical review of clustering methods and guideline for applications' <br>"
+author: "<br> Caroline X. Gao^1,2,3^ Dominic Dwyer^1,2^, Ye Zhu^4^, Catherine L. Smith^3^, Lan Du^5^, Kate M. Filia^1,2^, Johanna Bayer^1,2^, Jana M. Menssink^1,2^, Teresa Wang^5^, Christoph Bergmeir^5^, Stephen Wood^1,2^, Sue M. Cotton^1,2^ <br>"
+date: "<br> ^1^ Centre for Youth Mental Health, The University of Melbourne, Parkville. VIC, Australia <br> ^2^ Orygen, Parkville, VIC, Australia <br>  ^3^ Department of Epidemiology and Preventative Medicine, School of Public Health and Preventive Medicine, Monash University, Melbourne, VIC, Australia <br> ^4^ School of IT, Deakin Unviersity, Geelong, VIC 3220, Australia <br? ^5^ Faculty of Information Technology, Monash University, Clayton, VIC, Australia <br><br> **Corresponding: carolineg@unimelb.edu.au** <br><br>"
 ---
 <style type="text/css">
 div.main-container {
@@ -22,6 +21,9 @@ library(pacman)
 p_load("tidyverse","litsearchr", "here","revtools", "igraph", "tidytext", "reactable", "readxl","waffle") 
 sessionInfo()
 ```
+
+
+
 
 # Literature search 
 
@@ -282,7 +284,7 @@ Data extraction results were listed below.
 
 ```{r}
 Results<-as_tibble(read_excel("Full text reviewed.xlsx")) %>% 
-   mutate_at(vars(`Reported method selecting number of clusters`:`Avaliable data`), 
+   mutate_at(vars(`Pre-registration` ,`Reported method selecting number of clusters`:`Avaliable data`), 
                    function(x) factor(as.numeric(x), levels=c(0,1), labels=c("No","Yes")))
 
 Results %>% 
@@ -381,8 +383,8 @@ Over 80% of publications reported methods for choosing best number of custers an
 
 ```{r,fig.width=10,fig.height=5}
 Results %>% 
-  select(ID,`Reported method selecting number of clusters`:`Avaliable data`) %>% 
-  pivot_longer(cols=`Reported method selecting number of clusters`:`Avaliable data`,
+  select(ID,`Pre-registration`,`Reported method selecting number of clusters`:`Avaliable data`) %>% 
+  pivot_longer(cols=`Pre-registration`:`Avaliable data`,
                  names_to="Indicator",values_to= "Type") %>% 
   mutate(Type=as.numeric(Type)-1) %>% 
   group_by(Indicator) %>% 
